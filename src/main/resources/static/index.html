@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scalable Read API - Dashboard</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --ink:#1d2433; --muted:#667085; --accent:#3b5bdb; --ok:#2f9e44; --line:#e4e7ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151c; --card:#1b1f2a; --ink:#e8ebf2; --muted:#98a2b3; --accent:#7c93ff; --ok:#51cf66; --line:#2a3040; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:20px 28px; border-bottom:1px solid var(--line); }
+  h1 { margin:0; font-size:20px; } header p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:18px; padding:20px 28px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; overflow:hidden; }
+  h2 { margin:0 0 12px; font-size:15px; }
+  button, select { font:inherit; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  .badge { font-size:12px; padding:3px 8px; border-radius:999px; background:var(--bg); color:var(--muted); }
+  .badge.ok { color:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; cursor:default; }
+  td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
+  .stats { display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin:10px 0; }
+  .stat { background:var(--bg); border-radius:8px; padding:8px 10px; } .stat b { display:block; font-size:18px; } .stat span { font-size:11px; color:var(--muted); }
+  .note { font-size:12px; color:var(--muted); margin-top:8px; }
+  .excerpt { color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Scalable Read APIs - Pagination, Caching &amp; Optimization</h1>
+  <p>Unit 2 - Experiment 6. Every request shows client time and server time (X-Response-Time-Ms).</p>
+</header>
+<main>
+  <section>
+    <h2>Post feed (pagination + sorting)</h2>
+    <div class="row">
+      <label>Sort <select id="sort">
+        <option value="createdAt,desc">Newest</option><option value="createdAt,asc">Oldest</option>
+        <option value="likes,desc">Most liked</option><option value="views,desc">Most viewed</option>
+        <option value="title,asc">Title A-Z</option></select></label>
+      <label>Size <select id="size"><option>5</option><option selected>10</option><option>25</option><option>50</option></select></label>
+      <label>Mode <select id="mode"><option value="posts">Page (with count)</option><option value="posts/feed">Slice (no count)</option></select></label>
+    </div>
+    <table><thead><tr><th>Title</th><th>Author</th><th class="num">Likes</th><th class="num">Views</th></tr></thead><tbody id="feed"></tbody></table>
+    <div class="row" style="margin-top:10px">
+      <button id="prev">Prev</button><button id="next">Next</button>
+      <span class="badge" id="pageInfo"></span><span class="badge" id="feedTime"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Analytics (Ehcache)</h2>
+    <div class="row">
+      <button class="primary" id="loadAnalytics">Load /api/analytics</button>
+      <button id="loadUncached">Uncached baseline</button>
+      <button id="clearCache">Clear cache</button>
+      <span class="badge" id="anTime"></span>
+    </div>
+    <div class="stats" id="anStats"></div>
+    <table><thead><tr><th>Top author</th><th class="num">Posts</th><th class="num">Likes</th></tr></thead><tbody id="anAuthors"></tbody></table>
+    <div class="note">Click "Load" twice: the first call computes (about 500 ms), the second is served from cache (a few ms).</div>
+  </section>
+
+  <section>
+    <h2>N+1 problem vs JOIN FETCH</h2>
+    <div class="row"><button class="primary" id="runN1">Run comparison</button><span class="badge" id="n1Time"></span></div>
+    <table><thead><tr><th>Strategy</th><th class="num">SQL statements</th><th class="num">Time (ms)</th></tr></thead><tbody id="n1"></tbody></table>
+    <div class="note" id="n1Verdict"></div>
+  </section>
+
+  <section>
+    <h2>Top posts (native SQL, cached)</h2>
+    <div class="row"><button class="primary" id="loadTop">Load top 5</button><span class="badge" id="topTime"></span></div>
+    <table><thead><tr><th>Title</th><th>Author</th><th class="num">Likes</th></tr></thead><tbody id="top"></tbody></table>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let page = 0, hasNext = true;
+
+async function api(path, opts) {
+  const t = performance.now();
+  const r = await fetch(path, opts);
+  const client = Math.round(performance.now() - t);
+  const data = await r.json();
+  return { data, client, server: r.headers.get('X-Response-Time-Ms'), ok: r.ok };
+}
+const timing = (el, r) => { el.textContent = 'client ' + r.client + ' ms / server ' + r.server + ' ms'; el.className = 'badge ok'; };
+function cell(tr, text, cls) { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); return td; }
+function fill(tbodyId, rows) { const tb = $(tbodyId); tb.innerHTML = ''; rows.forEach(cols => { const tr = document.createElement('tr'); cols.forEach(c => cell(tr, c[0], c[1])); tb.appendChild(tr); }); }
+
+async function loadFeed() {
+  const q = '?page=' + page + '&size=' + $('size').value + '&sort=' + $('sort').value;
+  const r = await api('/api/' + $('mode').value + q);
+  if (!r.ok) { $('pageInfo').textContent = r.data.message; return; }
+  fill('feed', r.data.content.map(p => [[p.title], [p.authorName], [p.likes, 'num'], [p.views, 'num']]));
+  hasNext = $('mode').value === 'posts' ? !r.data.last : r.data.hasNext;
+  $('pageInfo').textContent = 'Page ' + (r.data.page + 1) + ($('mode').value === 'posts' ? ' of ' + r.data.totalPages + ' (' + r.data.totalElements + ' posts)' : '');
+  $('prev').disabled = page === 0; $('next').disabled = !hasNext;
+  timing($('feedTime'), r);
+}
+$('prev').onclick = () => { page--; loadFeed(); };
+$('next').onclick = () => { page++; loadFeed(); };
+['sort', 'size', 'mode'].forEach(id => $(id).onchange = () => { page = 0; loadFeed(); });
+
+async function loadAnalytics(path) {
+  const r = await api(path);
+  const a = r.data;
+  const s = $('anStats'); s.innerHTML = '';
+  [['Posts', a.totalPosts], ['Comments', a.totalComments], ['Total likes', a.totalLikes], ['Avg likes', a.avgLikesPerPost]].forEach(([k, v]) => {
+    const d = document.createElement('div'); d.className = 'stat';
+    const b = document.createElement('b'); b.textContent = v; const sp = document.createElement('span'); sp.textContent = k;
+    d.appendChild(b); d.appendChild(sp); s.appendChild(d);
+  });
+  fill('anAuthors', a.topAuthors.map(x => [[x.authorName], [x.posts, 'num'], [x.likes, 'num']]));
+  timing($('anTime'), r);
+}
+$('loadAnalytics').onclick = () => loadAnalytics('/api/analytics');
+$('loadUncached').onclick = () => loadAnalytics('/api/analytics/uncached');
+$('clearCache').onclick = async () => { await api('/api/cache', { method: 'DELETE' }); $('anTime').textContent = 'cache cleared'; $('anTime').className = 'badge'; };
+
+$('runN1').onclick = async () => {
+  $('runN1').disabled = true; $('n1Verdict').textContent = 'Running...';
+  const r = await api('/api/perf/n-plus-one');
+  fill('n1', [r.data.naive, r.data.joinFetch].map(x => [[x.strategy], [x.sqlStatements, 'num'], [x.millis, 'num']]));
+  $('n1Verdict').textContent = r.data.verdict; timing($('n1Time'), r); $('runN1').disabled = false;
+};
+
+$('loadTop').onclick = async () => {
+  const r = await api('/api/posts/top?limit=5');
+  fill('top', r.data.map(p => [[p.title], [p.authorName], [p.likes, 'num']])); timing($('topTime'), r);
+};
+
+loadFeed();
+</script>
+</body>
+</html>
