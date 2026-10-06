@@ -1,0 +1,11 @@
+{
+  "name": "scalable-read-api-vercel",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build-vercel.mjs"
+  }
+}

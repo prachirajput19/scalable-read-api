@@ -12,6 +12,19 @@ mvn spring-boot:run
 ```
 Open http://localhost:8080 for the dashboard. H2 console: http://localhost:8080/h2-console (JDBC URL `jdbc:h2:mem:readdb`, user `sa`, empty password).
 
+## Deploy API to Render and dashboard to Vercel
+
+Vercel serves the static dashboard; the Spring Boot API runs as a long-lived service on Render.
+
+1. Push this project to GitHub.
+2. In Render, choose **New > Blueprint**, connect the repository, and deploy the `scalable-read-api` service using `render.yaml`. Copy its public service URL.
+3. In Vercel, choose **Add New > Project**, import the same repository, and deploy from its root. Vercel uses `vercel.json` and the dependency-free Node build script to publish the dashboard.
+4. In the Vercel project settings, add `API_BASE_URL` with the Render service URL (for example, `https://your-service.onrender.com`) for Production, Preview, and Development as appropriate, then redeploy.
+5. In Render's service environment settings, set `APP_CORS_ALLOWED_ORIGINS` to the exact Vercel deployment origin (for example, `https://your-project.vercel.app`; do not include a path or trailing slash), then redeploy the API. Add any additional preview/custom-domain origins as comma-separated values; origins must match exactly.
+6. Open the Vercel URL. The dashboard calls the Render API; API routes are not executed by Vercel.
+
+The Docker image builds and runs the API with Java 25. It listens on Render's `PORT` environment variable and defaults to port 8080 locally. H2 is in-memory, so demo data is reseeded after each service restart; use a managed database for persistent production data.
+
 ## Endpoints
 | Method | URL | Demonstrates |
 |---|---|---|

@@ -80,13 +80,14 @@
   </section>
 </main>
 
+<script src="/api-config.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let page = 0, hasNext = true;
 
 async function api(path, opts) {
   const t = performance.now();
-  const r = await fetch(path, opts);
+  const r = await fetch((window.API_BASE_URL || '') + path, opts);
   const client = Math.round(performance.now() - t);
   const data = await r.json();
   return { data, client, server: r.headers.get('X-Response-Time-Ms'), ok: r.ok };
